@@ -21,7 +21,10 @@ button:hover{background:#00cc7a}
 .flex-row{display:flex;gap:10px;flex-wrap:wrap}
 .flex{flex:1}
 .inline{width:auto}
-#result{margin-top:10px;font-weight:bold}
+#result{margin-top:10px;font-weight:bold;padding:5px;border-radius:6px}
+#result.valid{color:#00ff9d}
+#result.expired{color:#ffcc00}
+#result.invalid{color:#ff4466}
 </style>
 </head>
 <body>
@@ -69,6 +72,7 @@ button:hover{background:#00cc7a}
 <h3>Verify PV1</h3>
 <div class="flex-row">
 <input id="verifyInput" class="flex" placeholder="Paste PV1 code">
+<select id="verifyContact" class="flex"></select>
 <button class="inline" onclick="verify()">Verify</button>
 </div>
 <div id="result"></div>
@@ -76,7 +80,6 @@ button:hover{background:#00cc7a}
 </div>
 
 <script>
-// ===== Vault & Contacts =====
 let key;
 let contacts = [];
 
@@ -114,6 +117,7 @@ async function unlock(){
     try{
         await decryptVault();
         populateContacts();
+        populateVerifyDropdown();
         document.getElementById("app").style.display="block";
         alert("Vault unlocked!");
     } catch{
@@ -128,12 +132,26 @@ function wipeData(){
         key = null;
         contacts = [];
         document.getElementById("app").style.display="none";
+        populateContacts();
+        populateVerifyDropdown();
     }
 }
 
 // ===== Populate Contacts Dropdown =====
 function populateContacts(){
     const sel = document.getElementById("contact");
+    sel.innerHTML = "";
+    contacts.forEach((c,i)=>{
+        const o = document.createElement("option");
+        o.value = i;
+        o.textContent = c.name;
+        sel.appendChild(o);
+    });
+}
+
+// ===== Populate Verify Dropdown =====
+function populateVerifyDropdown(){
+    const sel = document.getElementById("verifyContact");
     sel.innerHTML = "";
     contacts.forEach((c,i)=>{
         const o = document.createElement("option");
@@ -150,17 +168,15 @@ function genSecret(){
     document.getElementById("secret").value = Array.from(arr).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
-// ===== UUID for contact =====
-function uuidv4(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c=='x'?r:(r&0x3|0x8);return v.toString(16);});}
-
 // ===== Add Contact =====
 async function addContact(){
     const n = document.getElementById("name").value.trim();
     const s = document.getElementById("secret").value.trim();
     if(!n||!s) return alert("Name and Secret required");
-    contacts.push({id: uuidv4(), name:n, secret:s});
+    contacts.push({name:n, secret:s});
     await encryptVault();
     populateContacts();
+    populateVerifyDropdown();
     alert("Contact added!");
 }
 
@@ -171,13 +187,22 @@ async function deleteContact(){
     contacts.splice(sel.value,1);
     await encryptVault();
     populateContacts();
+    populateVerifyDropdown();
+}
+
+// ===== Canonical JSON =====
+function canonicalString(obj){
+    if(typeof obj !== "object" || obj === null) return JSON.stringify(obj);
+    if(Array.isArray(obj)) return '[' + obj.map(canonicalString).join(',') + ']';
+    const keys = Object.keys(obj).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalString(obj[k])).join(',') + '}';
 }
 
 // ===== Encode PV1 =====
 function encodePV1(obj, secret){
-    const json = JSON.stringify(obj);
-    const hmac = CryptoJS.HmacSHA256(json, secret).toString();
-    return btoa(JSON.stringify({data: obj, hmac}));
+    const payloadStr = canonicalString(obj);
+    const hmac = CryptoJS.HmacSHA256(payloadStr, secret).toString(CryptoJS.enc.Base64);
+    return btoa(JSON.stringify({payload: payloadStr, hmac}));
 }
 
 // ===== Decode PV1 =====
@@ -191,7 +216,11 @@ function generate(){
     if(sel.value==="") return alert("Select contact");
     const c = contacts[sel.value];
     const exp = parseInt(document.getElementById("expiry").value);
-    const code = {id:c.id,name:c.name,expiry:Date.now()+exp*1000};
+    const code = {
+        name: c.name,
+        timestamp: Date.now(),
+        expiry: exp*1000
+    };
     document.getElementById("out").textContent = encodePV1(code, c.secret);
 }
 
@@ -202,20 +231,34 @@ function copyPV1(){
     navigator.clipboard.writeText(out).then(()=>alert("Copied!"),()=>alert("Failed to copy"));
 }
 
-// ===== Verify PV1 =====
+// ===== Verify PV1 with color coding =====
 function verify(){
     const input = document.getElementById("verifyInput").value.trim();
+    const sel = document.getElementById("verifyContact");
+    const resultDiv = document.getElementById("result");
+    resultDiv.className = ""; // reset classes
     if(!input) return alert("Enter PV1 code");
+    if(sel.value === "") return alert("Select a contact for verification");
+
+    const c = contacts[sel.value];
     try{
         const decoded = decodePV1(input);
-        const d = decoded.data;
-        const contact = contacts.find(c=>c.id===d.id);
-        if(!contact) throw new Error("Contact not found");
-        const checkHmac = CryptoJS.HmacSHA256(JSON.stringify(d), contact.secret).toString();
+        const payloadObj = JSON.parse(decoded.payload);
+        const checkHmac = CryptoJS.HmacSHA256(decoded.payload, c.secret).toString(CryptoJS.enc.Base64);
         if(checkHmac !== decoded.hmac) throw new Error("Invalid HMAC");
-        document.getElementById("result").textContent = Date.now()>d.expiry?"❌ Expired":"✅ Valid for "+contact.name;
+
+        const validUntil = payloadObj.timestamp + payloadObj.expiry;
+        const expiryDate = new Date(validUntil).toLocaleString();
+        if(Date.now() > validUntil){
+            resultDiv.textContent = `⚠️ Valid but expired (expired at ${expiryDate})`;
+            resultDiv.classList.add("expired");
+        } else {
+            resultDiv.textContent = `✅ Valid for ${payloadObj.name} (expires at ${expiryDate})`;
+            resultDiv.classList.add("valid");
+        }
     } catch{
-        document.getElementById("result").textContent="❌ Invalid or tampered PV1";
+        resultDiv.textContent="❌ Invalid or tampered PV1";
+        resultDiv.classList.add("invalid");
     }
 }
 </script>
