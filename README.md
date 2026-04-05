@@ -1,3 +1,5 @@
+AI WAS USED TO CREATE THIS
+
 # ContactVerify 🔐
 
 ![Status](https://img.shields.io/badge/status-hobbyist-blue)
