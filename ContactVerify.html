@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ContactVerify</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Courier New',monospace;background:#0a0a0f;color:#e0e0f0;padding:20px;display:flex;justify-content:center}
+.container{max-width:800px;width:100%}
+h2,h3{text-shadow:0 0 5px #00ff9d}
+h2{text-align:center;margin-bottom:20px}
+.card{background:linear-gradient(145deg,#111,#0c0c1a);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:0 0 15px rgba(0,255,157,0.2)}
+input,select,button{padding:10px;margin:6px 0;border-radius:6px;border:none;font-size:1rem;width:100%}
+input,select{background:#111;color:#e0e0f0;border:1px solid #00ff9d}
+button{background:#00ff9d;color:#0a0a0f;font-weight:bold;cursor:pointer}
+button:hover{background:#00cc7a}
+.btn-danger{background:#ff4466;color:#fff}
+.code{font-size:1.3rem;color:#00ff9d;background:#111;padding:10px;border-radius:6px;margin-top:10px;word-break:break-word}
+.flex-row{display:flex;gap:10px;flex-wrap:wrap}
+.flex{flex:1}
+.inline{width:auto}
+#result{margin-top:10px;font-weight:bold}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h2>ContactVerify</h2>
+
+<div class="card">
+<h3>🔐 Unlock Vault</h3>
+<div class="flex-row">
+<input type="password" id="masterPass" class="flex" placeholder="Master Password">
+<button class="inline" onclick="unlock()">Unlock</button>
+</div>
+<button class="btn-danger" onclick="wipeData()">Wipe Vault</button>
+</div>
+
+<div class="card" id="app" style="display:none">
+<h3>Contacts</h3>
+<div class="flex-row">
+<input id="name" class="flex" placeholder="Name">
+<input id="secret" class="flex" placeholder="Secret">
+<button class="inline" onclick="genSecret()">Gen Secret</button>
+<button class="inline" onclick="addContact()">Add</button>
+</div>
+<div class="flex-row">
+<select id="contact" class="flex"></select>
+<button class="inline" onclick="deleteContact()">Delete</button>
+</div>
+
+<h3>Generate PV1</h3>
+<div class="flex-row">
+<select id="expiry" class="flex">
+<option value="300">5 min</option>
+<option value="900">15 min</option>
+<option value="3600">1h</option>
+<option value="86400">24h</option>
+</select>
+<button class="inline" onclick="generate()">Generate</button>
+</div>
+<div class="flex-row">
+<div class="code flex" id="out"></div>
+<button class="inline" onclick="copyPV1()">Copy</button>
+</div>
+
+<h3>Verify PV1</h3>
+<div class="flex-row">
+<input id="verifyInput" class="flex" placeholder="Paste PV1 code">
+<button class="inline" onclick="verify()">Verify</button>
+</div>
+<div id="result"></div>
+</div>
+</div>
+
+<script>
+// ===== Vault & Contacts =====
+let key;
+let contacts = [];
+
+// ===== AES-GCM key derivation =====
+async function deriveKey(password,salt){
+    const enc = new TextEncoder();
+    const km = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+    return await crypto.subtle.deriveKey(
+        {name:"PBKDF2",salt:enc.encode(salt),iterations:150000,hash:"SHA-256"},
+        km,{name:"AES-GCM",length:256},true,["encrypt","decrypt"]
+    );
+}
+
+// ===== Encrypt Vault =====
+async function encryptVault(){
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const data = new TextEncoder().encode(JSON.stringify(contacts));
+    const encrypted = await crypto.subtle.encrypt({name:"AES-GCM",iv},key,data);
+    localStorage.setItem("cvault",JSON.stringify({iv:[...iv],vault:[...new Uint8Array(encrypted)]}));
+}
+
+// ===== Decrypt Vault =====
+async function decryptVault(){
+    const d = JSON.parse(localStorage.getItem("cvault")||"null");
+    if(!d) return;
+    const dec = await crypto.subtle.decrypt({name:"AES-GCM",iv:new Uint8Array(d.iv)},key,new Uint8Array(d.vault));
+    contacts = JSON.parse(new TextDecoder().decode(dec));
+}
+
+// ===== Unlock Vault =====
+async function unlock(){
+    const p = document.getElementById("masterPass").value;
+    if(!p) return alert("Enter password");
+    key = await deriveKey(p,"cv");
+    try{
+        await decryptVault();
+        populateContacts();
+        document.getElementById("app").style.display="block";
+        alert("Vault unlocked!");
+    } catch{
+        alert("Wrong password or empty vault");
+    }
+}
+
+// ===== Wipe Vault =====
+function wipeData(){
+    if(confirm("Delete everything permanently?")){
+        localStorage.removeItem("cvault");
+        key = null;
+        contacts = [];
+        document.getElementById("app").style.display="none";
+    }
+}
+
+// ===== Populate Contacts Dropdown =====
+function populateContacts(){
+    const sel = document.getElementById("contact");
+    sel.innerHTML = "";
+    contacts.forEach((c,i)=>{
+        const o = document.createElement("option");
+        o.value = i;
+        o.textContent = c.name;
+        sel.appendChild(o);
+    });
+}
+
+// ===== Generate Random Secret =====
+function genSecret(){
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    document.getElementById("secret").value = Array.from(arr).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+// ===== UUID for contact =====
+function uuidv4(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c=='x'?r:(r&0x3|0x8);return v.toString(16);});}
+
+// ===== Add Contact =====
+async function addContact(){
+    const n = document.getElementById("name").value.trim();
+    const s = document.getElementById("secret").value.trim();
+    if(!n||!s) return alert("Name and Secret required");
+    contacts.push({id: uuidv4(), name:n, secret:s});
+    await encryptVault();
+    populateContacts();
+    alert("Contact added!");
+}
+
+// ===== Delete Contact =====
+async function deleteContact(){
+    const sel = document.getElementById("contact");
+    if(sel.value==="") return;
+    contacts.splice(sel.value,1);
+    await encryptVault();
+    populateContacts();
+}
+
+// ===== Encode PV1 =====
+function encodePV1(obj, secret){
+    const json = JSON.stringify(obj);
+    const hmac = CryptoJS.HmacSHA256(json, secret).toString();
+    return btoa(JSON.stringify({data: obj, hmac}));
+}
+
+// ===== Decode PV1 =====
+function decodePV1(str){
+    return JSON.parse(atob(str));
+}
+
+// ===== Generate PV1 =====
+function generate(){
+    const sel = document.getElementById("contact");
+    if(sel.value==="") return alert("Select contact");
+    const c = contacts[sel.value];
+    const exp = parseInt(document.getElementById("expiry").value);
+    const code = {id:c.id,name:c.name,expiry:Date.now()+exp*1000};
+    document.getElementById("out").textContent = encodePV1(code, c.secret);
+}
+
+// ===== Copy PV1 =====
+function copyPV1(){
+    const out = document.getElementById("out").textContent;
+    if(!out) return alert("Nothing to copy");
+    navigator.clipboard.writeText(out).then(()=>alert("Copied!"),()=>alert("Failed to copy"));
+}
+
+// ===== Verify PV1 =====
+function verify(){
+    const input = document.getElementById("verifyInput").value.trim();
+    if(!input) return alert("Enter PV1 code");
+    try{
+        const decoded = decodePV1(input);
+        const d = decoded.data;
+        const contact = contacts.find(c=>c.id===d.id);
+        if(!contact) throw new Error("Contact not found");
+        const checkHmac = CryptoJS.HmacSHA256(JSON.stringify(d), contact.secret).toString();
+        if(checkHmac !== decoded.hmac) throw new Error("Invalid HMAC");
+        document.getElementById("result").textContent = Date.now()>d.expiry?"❌ Expired":"✅ Valid for "+contact.name;
+    } catch{
+        document.getElementById("result").textContent="❌ Invalid or tampered PV1";
+    }
+}
+</script>
+</body>
+</html>
