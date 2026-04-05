@@ -18,7 +18,6 @@ AI WAS USED TO CREATE THIS
 - 👤 **Contact-Specific Codes**: Generate PV1 codes tied to a specific contact, with expiry times.  
 - ⏱ **Expiry Enforcement**: Codes expire after 5 min, 15 min, 1h, or 24h.  
 - 🛠 **Offline & Client-Side**: Fully functional in your browser, no server required.  
-- 🗂 **Unique IDs**: Each contact has a unique ID to allow duplicate names safely.  
 - 📋 **Copy-to-Clipboard**: One-click copy for PV1 codes.  
 - 💻 **Responsive UI**: Works on both desktop and mobile.  
 
