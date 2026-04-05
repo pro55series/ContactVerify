@@ -49,15 +49,6 @@ AI WAS USED TO CREATE THIS
 
 ---
 
-## Future Ideas
-
-- Optional **server-side verification** and anti-replay mechanisms  
-- **Multi-device syncing**  
-- Stronger password derivation using **Argon2**  
-- Enhanced UI/UX for “hacky terminal” style  
-
----
-
 ## Contributing
 
 Feel free to fork, open issues, or submit pull requests! This project is a hobbyist verification tool and designed for experimentation.  
